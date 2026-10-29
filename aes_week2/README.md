@@ -71,17 +71,6 @@ thực thi hằng định. Khi bảo vệ dữ liệu thật, dùng thư viện 
 chứng cùng chế độ phù hợp như AES-GCM. Trace hiển thị khóa và dữ liệu trung gian,
 chỉ bật với khóa thử nghiệm. Việc khớp vector không phải chứng nhận FIPS.
 
-## Chèn vào báo cáo
-
-- Mục 3.1: chèn phần `expand_key`; giải thích RotWord, SubWord và Rcon.
-- Mục 3.2: chèn `encrypt_block`; dẫn chiếu các hàm biến đổi khi cần.
-- Mục 4.2: chụp `python demo.py`, thấy rõ plaintext, key, ciphertext và PASS.
-- Mục 4.3: chụp trace vòng 0, vòng 1 và vòng 10; dùng bảng State trong báo cáo để đối chiếu.
-- Mục 4.4: chụp `python -m unittest -v`; giữ cả tổng số test và trạng thái OK.
-- Mục 4.5: bổ sung demo giải mã khi đã có `decrypt_block`; kiểm tra plaintext khôi phục
-  trùng từng byte với đầu vào. Hiện phần này mới có lý thuyết và mã giả trong báo cáo.
-- Phụ lục: chèn toàn bộ code hoặc liên kết repo và mã commit sau khi tự đẩy lên GitHub.
-
 ## Nguồn
 
 1. [NIST FIPS 197-upd1, cập nhật 09/05/2023](https://doi.org/10.6028/NIST.FIPS.197-upd1):
@@ -92,19 +81,3 @@ chỉ bật với khóa thử nghiệm. Việc khớp vector không phải chứ
 3. [NIST AES_Core128](https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Standards-and-Guidelines/documents/examples/AES_Core128.pdf):
    bốn cặp kiểm thử bổ sung. Từng khối được dùng độc lập để kiểm tra lõi AES;
    chương trình không triển khai chế độ ECB cho thông điệp nhiều khối.
-
-## Tạo repo
-
-Tạo repo trống trên GitHub rồi mở terminal tại thư mục này:
-
-```sh
-git init
-git add .
-git commit -m "Implement AES-128 encryption with round tracing"
-git branch -M main
-git remote add origin <URL_REPO_CUA_BAN>
-git push -u origin main
-```
-
-Thay `<URL_REPO_CUA_BAN>` bằng URL thật. Repo chỉ cần 5 file trong thư mục này;
-không cần đưa tài liệu dựng báo cáo hoặc dữ liệu riêng lên GitHub.
