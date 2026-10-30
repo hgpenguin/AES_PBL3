@@ -1,4 +1,4 @@
-"""AES-128 encryption following FIPS 197, with optional round tracing.
+"""AES-128 encryption and decryption with optional round tracing (FIPS 197).
 
 State uses column order: state[4 * column + row].
 This is an educational block cipher implementation, not a message protocol.
@@ -30,6 +30,9 @@ SBOX = bytes.fromhex(
     "8c a1 89 0d bf e6 42 68 41 99 2d 0f b0 54 bb 16"
 )
 
+# Invert the permutation: INV_SBOX[SBOX[value]] == value.
+INV_SBOX = bytes(SBOX.index(value) for value in range(256))
+
 
 def xtime(value: int) -> int:
     """Multiply a byte by {02} in GF(2^8), modulo x^8+x^4+x^3+x+1."""
@@ -40,10 +43,23 @@ def sub_bytes(state: bytes) -> bytes:
     return bytes(SBOX[value] for value in state)
 
 
+def inv_sub_bytes(state: bytes) -> bytes:
+    return bytes(INV_SBOX[value] for value in state)
+
+
 def shift_rows(state: bytes) -> bytes:
     """Rotate row r to the left by r positions; retain column order."""
     return bytes(
         state[4 * ((column + row) % 4) + row]
+        for column in range(4)
+        for row in range(4)
+    )
+
+
+def inv_shift_rows(state: bytes) -> bytes:
+    """Rotate row r to the right by r positions; retain column order."""
+    return bytes(
+        state[4 * ((column - row) % 4) + row]
         for column in range(4)
         for row in range(4)
     )
@@ -60,6 +76,31 @@ def mix_columns(state: bytes) -> bytes:
             a ^ xtime(b) ^ xtime(c) ^ c ^ d,
             a ^ b ^ xtime(c) ^ xtime(d) ^ d,
             xtime(a) ^ a ^ b ^ c ^ xtime(d),
+        ))
+    return bytes(result)
+
+
+def _multiply(value: int, factor: int) -> int:
+    """Multiply two bytes in GF(2^8) using xtime and XOR."""
+    result = 0
+    while factor:
+        if factor & 1:
+            result ^= value
+        value = xtime(value)
+        factor >>= 1
+    return result
+
+
+def inv_mix_columns(state: bytes) -> bytes:
+    """Multiply each column by the FIPS 197 inverse MixColumns matrix."""
+    result = bytearray(BLOCK_SIZE)
+    for offset in range(0, BLOCK_SIZE, 4):
+        a, b, c, d = state[offset:offset + 4]
+        result[offset:offset + 4] = bytes((
+            _multiply(a, 0x0E) ^ _multiply(b, 0x0B) ^ _multiply(c, 0x0D) ^ _multiply(d, 0x09),
+            _multiply(a, 0x09) ^ _multiply(b, 0x0E) ^ _multiply(c, 0x0B) ^ _multiply(d, 0x0D),
+            _multiply(a, 0x0D) ^ _multiply(b, 0x09) ^ _multiply(c, 0x0E) ^ _multiply(d, 0x0B),
+            _multiply(a, 0x0B) ^ _multiply(b, 0x0D) ^ _multiply(c, 0x09) ^ _multiply(d, 0x0E),
         ))
     return bytes(result)
 
@@ -116,4 +157,34 @@ def encrypt_block(plaintext: bytes, key: bytes, *, trace: Trace | None = None) -
         record(round_number, "RoundKey", round_keys[round_number])
         state = record(round_number, "AddRoundKey",
                        add_round_key(state, round_keys[round_number]))
+    return state
+
+
+def decrypt_block(ciphertext: bytes, key: bytes, *, trace: Trace | None = None) -> bytes:
+    """Decrypt one 16-byte block using INVCIPHER and the original round keys.
+
+    Trace rounds run from 0 to 10, using keys K10 down to K0.
+    Events: Input, RoundKey, InvShiftRows, InvSubBytes, AddRoundKey, InvMixColumns.
+    No padding, text decoding, mode of operation, or authentication is added.
+    """
+    _require_block(ciphertext, "ciphertext")
+    round_keys = expand_key(key)
+
+    def record(round_number: int, step: str, value: bytes) -> bytes:
+        if trace is not None:
+            trace(round_number, step, value)
+        return value
+
+    state = record(0, "Input", ciphertext)
+    record(0, "RoundKey", round_keys[ROUNDS])
+    state = record(0, "AddRoundKey", add_round_key(state, round_keys[ROUNDS]))
+
+    for round_number in range(1, ROUNDS + 1):
+        state = record(round_number, "InvShiftRows", inv_shift_rows(state))
+        state = record(round_number, "InvSubBytes", inv_sub_bytes(state))
+        round_key = round_keys[ROUNDS - round_number]
+        record(round_number, "RoundKey", round_key)
+        state = record(round_number, "AddRoundKey", add_round_key(state, round_key))
+        if round_number != ROUNDS:
+            state = record(round_number, "InvMixColumns", inv_mix_columns(state))
     return state

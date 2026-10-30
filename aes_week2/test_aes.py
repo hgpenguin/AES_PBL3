@@ -4,12 +4,20 @@ Run: python -m unittest -v
 Reference links and the distinction between standard versions are in README.md.
 """
 
+from contextlib import redirect_stdout
+from io import StringIO
+from random import Random
 import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from aes import encrypt_block, expand_key, xtime
+import demo
+from aes import (
+    decrypt_block, encrypt_block, expand_key, inv_mix_columns, inv_shift_rows,
+    inv_sub_bytes, mix_columns, shift_rows, sub_bytes, xtime,
+)
 
 KEY = bytes.fromhex("000102030405060708090a0b0c0d0e0f")
 PLAINTEXT = bytes.fromhex("00112233445566778899aabbccddeeff")
@@ -78,6 +86,9 @@ class AESTests(unittest.TestCase):
     def test_fips_ciphertext(self):
         self.assertEqual(encrypt_block(PLAINTEXT, KEY), CIPHERTEXT)
 
+    def test_fips_plaintext(self):
+        self.assertEqual(decrypt_block(CIPHERTEXT, KEY), PLAINTEXT)
+
     def test_nist_core_blocks(self):
         key = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
         vectors = (
@@ -89,6 +100,28 @@ class AESTests(unittest.TestCase):
         for plaintext, expected in vectors:
             with self.subTest(plaintext=plaintext):
                 self.assertEqual(encrypt_block(bytes.fromhex(plaintext), key).hex(), expected)
+                self.assertEqual(decrypt_block(bytes.fromhex(expected), key).hex(), plaintext)
+
+    def test_inverse_transformations(self):
+        all_bytes = bytes(range(256))
+        self.assertEqual(inv_sub_bytes(sub_bytes(all_bytes)), all_bytes)
+        # FIPS C.1: State after ShiftRows and MixColumns in encryption round 1.
+        shifted = bytes.fromhex(ROUND_STATES[1])
+        mixed = bytes.fromhex(ROUND_STATES[2])
+        self.assertEqual(inv_shift_rows(shifted).hex(), ROUND_STATES[0])
+        self.assertEqual(inv_mix_columns(mixed), shifted)
+        for offset in range(0, 256, 16):
+            state = all_bytes[offset:offset + 16]
+            self.assertEqual(inv_shift_rows(shift_rows(state)), state)
+            self.assertEqual(inv_mix_columns(mix_columns(state)), state)
+
+    def test_round_trip(self):
+        rng = Random(197)
+        cases = [(bytes(16), bytes(16)), (b"\xff" * 16, b"\xff" * 16)]
+        cases.extend((rng.randbytes(16), rng.randbytes(16)) for _ in range(32))
+        for plaintext, key in cases:
+            with self.subTest(plaintext=plaintext.hex(), key=key.hex()):
+                self.assertEqual(decrypt_block(encrypt_block(plaintext, key), key), plaintext)
 
     def test_all_round_keys(self):
         self.assertEqual([key.hex() for key in expand_key(KEY)], ROUND_KEYS)
@@ -109,6 +142,31 @@ class AESTests(unittest.TestCase):
             expected.append((round_number, "AddRoundKey", next(states)))
         self.assertEqual(events, expected)
 
+    def test_every_decryption_intermediate_state(self):
+        events = []
+        result = decrypt_block(CIPHERTEXT, KEY, trace=lambda r, s, v: events.append((r, s, v.hex())))
+        self.assertEqual(result, PLAINTEXT)
+        expected = [(0, "Input", CIPHERTEXT.hex()), (0, "RoundKey", ROUND_KEYS[10]),
+                    (0, "AddRoundKey", ROUND_STATES[37])]
+        # Undo the fixed reference states above, without calling encryption or
+        # inverse helpers to generate the expected values.
+        for round_number in range(1, 10):
+            key_index = 10 - round_number
+            expected.extend([
+                (round_number, "InvShiftRows", ROUND_STATES[4 * key_index]),
+                (round_number, "InvSubBytes", ROUND_STATES[4 * key_index - 1]),
+                (round_number, "RoundKey", ROUND_KEYS[key_index]),
+                (round_number, "AddRoundKey", ROUND_STATES[4 * key_index - 2]),
+                (round_number, "InvMixColumns", ROUND_STATES[4 * key_index - 3]),
+            ])
+        expected.extend([
+            (10, "InvShiftRows", ROUND_STATES[0]),
+            (10, "InvSubBytes", "00102030405060708090a0b0c0d0e0f0"),
+            (10, "RoundKey", ROUND_KEYS[0]),
+            (10, "AddRoundKey", PLAINTEXT.hex()),
+        ])
+        self.assertEqual(events, expected)
+
     def test_xtime_reduction(self):
         # FIPS 197-upd1, section 4.2, equation 4.6.
         self.assertEqual(xtime(0x57), 0xAE)
@@ -117,18 +175,21 @@ class AESTests(unittest.TestCase):
         self.assertEqual(xtime(0x8E), 0x07)
 
     def test_reject_invalid_blocks_and_keys(self):
-        for size in (0, 1, 15, 17, 24, 32):
-            with self.subTest(size=size):
-                with self.assertRaises(ValueError):
-                    encrypt_block(bytes(size), KEY)
-                with self.assertRaises(ValueError):
-                    encrypt_block(PLAINTEXT, bytes(size))
-        for value in ("0" * 16, None, 16):
-            with self.subTest(value=value):
-                with self.assertRaises(TypeError):
-                    encrypt_block(value, KEY)
-                with self.assertRaises(TypeError):
-                    expand_key(value)
+        for operation in (encrypt_block, decrypt_block):
+            for size in (0, 1, 15, 17, 24, 32):
+                with self.subTest(operation=operation.__name__, size=size):
+                    with self.assertRaises(ValueError):
+                        operation(bytes(size), KEY)
+                    with self.assertRaises(ValueError):
+                        operation(PLAINTEXT, bytes(size))
+            for value in ("0" * 16, None, 16):
+                with self.subTest(operation=operation.__name__, value=value):
+                    with self.assertRaises(TypeError):
+                        operation(value, KEY)
+                    with self.assertRaises(TypeError):
+                        operation(PLAINTEXT, value)
+                    with self.assertRaises(TypeError):
+                        expand_key(value)
 
     def test_cli_inputs(self):
         demo = str(Path(__file__).with_name("demo.py"))
@@ -144,6 +205,68 @@ class AESTests(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 result = subprocess.run([sys.executable, demo, *arguments], capture_output=True)
                 self.assertEqual(result.returncode, expected_code, result.stderr)
+
+    def test_cli_round_trip(self):
+        demo_path = str(Path(__file__).with_name("demo.py"))
+        cases = (
+            ([], PLAINTEXT.hex(), None),
+            (["--text", "AES week 2 demo!"], "AES week 2 demo!".encode().hex(), "AES week 2 demo!"),
+            (["--text", "é" * 8], ("é" * 8).encode().hex(), "é" * 8),
+            (["--plaintext", "ff" * 16, "--key", "00" * 16], "ff" * 16, None),
+        )
+        for arguments, expected, original_text in cases:
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(
+                    [sys.executable, "-X", "utf8", demo_path, *arguments],
+                    capture_output=True, text=True, encoding="utf-8",
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"Recovered : {expected}", result.stdout)
+                self.assertIn("Round-trip: PASS", result.stdout)
+                if not arguments:
+                    self.assertIn(f"Ciphertext: {CIPHERTEXT.hex()}", result.stdout)
+                    self.assertIn("FIPS C.1  : PASS", result.stdout)
+                else:
+                    self.assertNotIn("FIPS C.1", result.stdout)
+                if original_text is not None:
+                    self.assertIn(f"Text      : {original_text}", result.stdout)
+                else:
+                    self.assertNotIn("Text      :", result.stdout)
+
+    def test_cli_trace(self):
+        demo_path = str(Path(__file__).with_name("demo.py"))
+        result = subprocess.run(
+            [sys.executable, demo_path, "--trace"], capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        encryption, decryption = result.stdout.split("\nDECRYPT\n")
+        self.assertIn("\nENCRYPT\n", encryption)
+        self.assertIn("InvShiftRows", decryption)
+        self.assertIn("InvSubBytes", decryption)
+        self.assertEqual(decryption.count("InvMixColumns"), 9)
+        key_lines = [line for line in decryption.splitlines() if "RoundKey K" in line]
+        self.assertEqual(len(key_lines), 11)
+        for round_number, line in enumerate(key_lines):
+            self.assertIn(f"Round {round_number:02d}", line)
+            self.assertIn(f"RoundKey K{10 - round_number} ", line)
+            self.assertTrue(line.endswith(ROUND_KEYS[10 - round_number]))
+        self.assertIn(f"Recovered : {PLAINTEXT.hex()}", decryption)
+        self.assertIn("Round-trip: PASS", decryption)
+
+    def test_demo_reports_verification_failure(self):
+        cases = (
+            ("decrypt_block", "Round-trip: FAIL"),
+            ("encrypt_block", "FIPS C.1  : FAIL"),
+        )
+        for function_name, message in cases:
+            with self.subTest(function_name=function_name):
+                output = StringIO()
+                with patch.object(sys, "argv", ["demo.py"]), redirect_stdout(output):
+                    with patch.object(demo, function_name, return_value=bytes(16)):
+                        with self.assertRaises(SystemExit) as error:
+                            demo.main()
+                self.assertEqual(error.exception.code, 1)
+                self.assertIn(message, output.getvalue())
 
 
 if __name__ == "__main__":
