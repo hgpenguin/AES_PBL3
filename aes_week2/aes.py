@@ -1,7 +1,4 @@
-"""AES-128 encryption and decryption with optional round tracing (FIPS 197).
-
-State uses column order: state[4 * column + row].
-This is an educational block cipher implementation, not a message protocol.
+"""Mã hóa và giải mã AES-128 với tùy chọn theo dõi từng vòng (FIPS 197).
 """
 
 from collections.abc import Callable
@@ -10,7 +7,6 @@ BLOCK_SIZE = 16
 ROUNDS = 10
 Trace = Callable[[int, str, bytes], None]
 
-# FIPS 197, Table 4. Each line corresponds to one high hexadecimal digit.
 SBOX = bytes.fromhex(
     "63 7c 77 7b f2 6b 6f c5 30 01 67 2b fe d7 ab 76"
     "ca 82 c9 7d fa 59 47 f0 ad d4 a2 af 9c a4 72 c0"
@@ -30,12 +26,11 @@ SBOX = bytes.fromhex(
     "8c a1 89 0d bf e6 42 68 41 99 2d 0f b0 54 bb 16"
 )
 
-# Invert the permutation: INV_SBOX[SBOX[value]] == value.
+# Bảng hoán vị nghịch đảo: INV_SBOX[SBOX[value]] == value.
 INV_SBOX = bytes(SBOX.index(value) for value in range(256))
 
 
 def xtime(value: int) -> int:
-    """Multiply a byte by {02} in GF(2^8), modulo x^8+x^4+x^3+x+1."""
     return ((value << 1) ^ (0x1B if value & 0x80 else 0)) & 0xFF
 
 
@@ -48,7 +43,6 @@ def inv_sub_bytes(state: bytes) -> bytes:
 
 
 def shift_rows(state: bytes) -> bytes:
-    """Rotate row r to the left by r positions; retain column order."""
     return bytes(
         state[4 * ((column + row) % 4) + row]
         for column in range(4)
@@ -57,7 +51,6 @@ def shift_rows(state: bytes) -> bytes:
 
 
 def inv_shift_rows(state: bytes) -> bytes:
-    """Rotate row r to the right by r positions; retain column order."""
     return bytes(
         state[4 * ((column - row) % 4) + row]
         for column in range(4)
@@ -66,11 +59,10 @@ def inv_shift_rows(state: bytes) -> bytes:
 
 
 def mix_columns(state: bytes) -> bytes:
-    """Multiply each column by the FIPS 197 MixColumns matrix."""
     result = bytearray(BLOCK_SIZE)
     for offset in range(0, BLOCK_SIZE, 4):
         a, b, c, d = state[offset:offset + 4]
-        # {03} * x = xtime(x) XOR x.
+        # Phép nhân {03} * x = xtime(x) XOR x.
         result[offset:offset + 4] = bytes((
             xtime(a) ^ xtime(b) ^ b ^ c ^ d,
             a ^ xtime(b) ^ xtime(c) ^ c ^ d,
@@ -81,7 +73,7 @@ def mix_columns(state: bytes) -> bytes:
 
 
 def _multiply(value: int, factor: int) -> int:
-    """Multiply two bytes in GF(2^8) using xtime and XOR."""
+    """Nhân hai byte trong GF(2^8) bằng cách sử dụng phép nhân xtime và phép XOR."""
     result = 0
     while factor:
         if factor & 1:
@@ -92,7 +84,6 @@ def _multiply(value: int, factor: int) -> int:
 
 
 def inv_mix_columns(state: bytes) -> bytes:
-    """Multiply each column by the FIPS 197 inverse MixColumns matrix."""
     result = bytearray(BLOCK_SIZE)
     for offset in range(0, BLOCK_SIZE, 4):
         a, b, c, d = state[offset:offset + 4]
@@ -117,14 +108,13 @@ def _require_block(value: bytes, name: str) -> None:
 
 
 def expand_key(key: bytes) -> tuple[bytes, ...]:
-    """Expand a 16-byte key into K0 through K10 (44 four-byte words)."""
     _require_block(key, "key")
     words = [key[offset:offset + 4] for offset in range(0, BLOCK_SIZE, 4)]
     rcon = 0x01
     for index in range(4, 4 * (ROUNDS + 1)):
         temp = words[index - 1]
         if index % 4 == 0:
-            temp = sub_bytes(temp[1:] + temp[:1])  # RotWord, then SubWord
+            temp = sub_bytes(temp[1:] + temp[:1])  # RotWord, sau đó là SubWord
             temp = bytes((temp[0] ^ rcon,)) + temp[1:]
             rcon = xtime(rcon)
         words.append(add_round_key(words[index - 4], temp))
@@ -132,11 +122,7 @@ def expand_key(key: bytes) -> tuple[bytes, ...]:
 
 
 def encrypt_block(plaintext: bytes, key: bytes, *, trace: Trace | None = None) -> bytes:
-    """Encrypt one 16-byte block; trace receives immutable byte snapshots.
 
-    Events: Input, RoundKey, SubBytes, ShiftRows, MixColumns, AddRoundKey.
-    No padding, text encoding, mode of operation, or authentication is added.
-    """
     _require_block(plaintext, "plaintext")
     round_keys = expand_key(key)
 
@@ -161,12 +147,7 @@ def encrypt_block(plaintext: bytes, key: bytes, *, trace: Trace | None = None) -
 
 
 def decrypt_block(ciphertext: bytes, key: bytes, *, trace: Trace | None = None) -> bytes:
-    """Decrypt one 16-byte block using INVCIPHER and the original round keys.
-
-    Trace rounds run from 0 to 10, using keys K10 down to K0.
-    Events: Input, RoundKey, InvShiftRows, InvSubBytes, AddRoundKey, InvMixColumns.
-    No padding, text decoding, mode of operation, or authentication is added.
-    """
+    
     _require_block(ciphertext, "ciphertext")
     round_keys = expand_key(key)
 

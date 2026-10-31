@@ -1,17 +1,29 @@
-"""Known-answer tests from FIPS 197 (2001), C.1, and NIST AES_Core128.
+"""Các bài kiểm thử theo đáp án chuẩn (Known-answer tests) từ FIPS 197 (2001), Phụ lục C.1 và NIST AES_Core128.
 
-Run: python -m unittest -v
-Reference links and the distinction between standard versions are in README.md.
+Cách chạy: python -m unittest -v
+Các liên kết tham khảo và sự phân biệt giữa các phiên bản tiêu chuẩn có trong README.md.
 """
 
 from contextlib import redirect_stdout
 from io import StringIO
+from pathlib import Path
 from random import Random
 import subprocess
 import sys
 import unittest
-from pathlib import Path
 from unittest.mock import patch
+
+# Đảm bảo mã hóa UTF-8 cho stdout/stderr khi chạy trên Windows console
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 import demo
 from aes import (
@@ -23,8 +35,8 @@ KEY = bytes.fromhex("000102030405060708090a0b0c0d0e0f")
 PLAINTEXT = bytes.fromhex("00112233445566778899aabbccddeeff")
 CIPHERTEXT = bytes.fromhex("69c4e0d86a7b0430d8cdb78070b4c55a")
 
-# SubBytes, ShiftRows, MixColumns, AddRoundKey for rounds 1..9.
-# Round 10 omits MixColumns. These values are independent reference data.
+# Các trạng thái SubBytes, ShiftRows, MixColumns, AddRoundKey cho các vòng từ 1 đến 9.
+# Vòng 10 bỏ qua bước MixColumns. Các giá trị này là dữ liệu tham chiếu chuẩn độc lập.
 ROUND_STATES = """
 63cab7040953d051cd60e0e7ba70e18c
 6353e08c0960e104cd70b751bacad0e7
@@ -83,12 +95,15 @@ b6ff744ed2c2c9bf6c590cbf0469bf41
 
 
 class AESTests(unittest.TestCase):
+    # Kiểm tra mã hóa khối theo dữ liệu mẫu chuẩn FIPS 197 (Phụ lục C.1).
     def test_fips_ciphertext(self):
         self.assertEqual(encrypt_block(PLAINTEXT, KEY), CIPHERTEXT)
 
+    # Kiểm tra giải mã khối theo dữ liệu mẫu chuẩn FIPS 197 (Phụ lục C.1).
     def test_fips_plaintext(self):
         self.assertEqual(decrypt_block(CIPHERTEXT, KEY), PLAINTEXT)
 
+    # Kiểm tra mã hóa và giải mã với 4 khối kiểm thử từ tài liệu NIST AES_Core128.
     def test_nist_core_blocks(self):
         key = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
         vectors = (
@@ -102,10 +117,11 @@ class AESTests(unittest.TestCase):
                 self.assertEqual(encrypt_block(bytes.fromhex(plaintext), key).hex(), expected)
                 self.assertEqual(decrypt_block(bytes.fromhex(expected), key).hex(), plaintext)
 
+    # Kiểm tra tính nghịch đảo của các phép biến đổi: SubBytes, ShiftRows, MixColumns.
     def test_inverse_transformations(self):
         all_bytes = bytes(range(256))
         self.assertEqual(inv_sub_bytes(sub_bytes(all_bytes)), all_bytes)
-        # FIPS C.1: State after ShiftRows and MixColumns in encryption round 1.
+        # FIPS C.1: Trạng thái sau ShiftRows và MixColumns trong vòng mã hóa 1.
         shifted = bytes.fromhex(ROUND_STATES[1])
         mixed = bytes.fromhex(ROUND_STATES[2])
         self.assertEqual(inv_shift_rows(shifted).hex(), ROUND_STATES[0])
@@ -115,6 +131,7 @@ class AESTests(unittest.TestCase):
             self.assertEqual(inv_shift_rows(shift_rows(state)), state)
             self.assertEqual(inv_mix_columns(mix_columns(state)), state)
 
+    # Kiểm tra tính toàn vẹn hai chiều (mã hóa -> giải mã khôi phục đúng bản rõ ban đầu) với 34 trường hợp ngẫu nhiên.
     def test_round_trip(self):
         rng = Random(197)
         cases = [(bytes(16), bytes(16)), (b"\xff" * 16, b"\xff" * 16)]
@@ -123,9 +140,11 @@ class AESTests(unittest.TestCase):
             with self.subTest(plaintext=plaintext.hex(), key=key.hex()):
                 self.assertEqual(decrypt_block(encrypt_block(plaintext, key), key), plaintext)
 
+    # Kiểm tra tính chính xác của toàn bộ 11 khóa vòng sinh ra từ thuật toán KeyExpansion.
     def test_all_round_keys(self):
         self.assertEqual([key.hex() for key in expand_key(KEY)], ROUND_KEYS)
 
+    # Kiểm tra chính xác từng trạng thái trung gian của tất cả các bước trong quá trình mã hóa.
     def test_every_intermediate_state(self):
         events = []
         result = encrypt_block(PLAINTEXT, KEY, trace=lambda r, s, v: events.append((r, s, v.hex())))
@@ -142,14 +161,15 @@ class AESTests(unittest.TestCase):
             expected.append((round_number, "AddRoundKey", next(states)))
         self.assertEqual(events, expected)
 
+    # Kiểm tra chính xác từng trạng thái trung gian của tất cả các bước trong quá trình giải mã.
     def test_every_decryption_intermediate_state(self):
         events = []
         result = decrypt_block(CIPHERTEXT, KEY, trace=lambda r, s, v: events.append((r, s, v.hex())))
         self.assertEqual(result, PLAINTEXT)
         expected = [(0, "Input", CIPHERTEXT.hex()), (0, "RoundKey", ROUND_KEYS[10]),
                     (0, "AddRoundKey", ROUND_STATES[37])]
-        # Undo the fixed reference states above, without calling encryption or
-        # inverse helpers to generate the expected values.
+        # Hoàn tác các trạng thái tham chiếu cố định ở trên, không gọi các hàm
+        # mã hóa hoặc hàm nghịch đảo bổ trợ để tạo giá trị kỳ vọng.
         for round_number in range(1, 10):
             key_index = 10 - round_number
             expected.extend([
@@ -167,13 +187,15 @@ class AESTests(unittest.TestCase):
         ])
         self.assertEqual(events, expected)
 
+    # Kiểm tra phép rút gọn xtime theo công thức 4.6, mục 4.2 của FIPS 197-upd1.
     def test_xtime_reduction(self):
-        # FIPS 197-upd1, section 4.2, equation 4.6.
+        # FIPS 197-upd1, mục 4.2, phương trình 4.6.
         self.assertEqual(xtime(0x57), 0xAE)
         self.assertEqual(xtime(0xAE), 0x47)
         self.assertEqual(xtime(0x47), 0x8E)
         self.assertEqual(xtime(0x8E), 0x07)
 
+    # Kiểm tra việc từ chối các khối và khóa không hợp lệ (sai kích thước hoặc sai kiểu dữ liệu).
     def test_reject_invalid_blocks_and_keys(self):
         for operation in (encrypt_block, decrypt_block):
             for size in (0, 1, 15, 17, 24, 32):
@@ -191,6 +213,7 @@ class AESTests(unittest.TestCase):
                     with self.assertRaises(TypeError):
                         expand_key(value)
 
+    # Kiểm tra xử lý đối số dòng lệnh CLI (các trường hợp hợp lệ và không hợp lệ).
     def test_cli_inputs(self):
         demo = str(Path(__file__).with_name("demo.py"))
         cases = (
@@ -198,7 +221,7 @@ class AESTests(unittest.TestCase):
             (["--text", "AES week 2 demo!"], 0),
             (["--plaintext", "zz"], 2),
             (["--key", "00"], 2),
-            (["--text", "é" * 16], 2),  # 16 characters, but 32 UTF-8 bytes.
+            (["--text", "é" * 16], 2),  # 16 ký tự, nhưng khi mã hóa UTF-8 là 32 byte.
             (["--text", "", "--plaintext", PLAINTEXT.hex()], 2),
         )
         for arguments, expected_code in cases:
@@ -206,6 +229,7 @@ class AESTests(unittest.TestCase):
                 result = subprocess.run([sys.executable, demo, *arguments], capture_output=True)
                 self.assertEqual(result.returncode, expected_code, result.stderr)
 
+    # Kiểm tra chu trình mã hóa và giải mã thông qua giao diện dòng lệnh CLI.
     def test_cli_round_trip(self):
         demo_path = str(Path(__file__).with_name("demo.py"))
         cases = (
@@ -233,6 +257,7 @@ class AESTests(unittest.TestCase):
                 else:
                     self.assertNotIn("Text      :", result.stdout)
 
+    # Kiểm tra tính năng theo dõi từng bước (--trace) trong giao diện dòng lệnh CLI.
     def test_cli_trace(self):
         demo_path = str(Path(__file__).with_name("demo.py"))
         result = subprocess.run(
@@ -253,6 +278,7 @@ class AESTests(unittest.TestCase):
         self.assertIn(f"Recovered : {PLAINTEXT.hex()}", decryption)
         self.assertIn("Round-trip: PASS", decryption)
 
+    # Kiểm tra việc báo lỗi (FAIL) và thoát mã 1 khi xác minh thất bại trong demo.py.
     def test_demo_reports_verification_failure(self):
         cases = (
             ("decrypt_block", "Round-trip: FAIL"),
