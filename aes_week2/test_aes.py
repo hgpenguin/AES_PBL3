@@ -1,7 +1,6 @@
 """Các bài kiểm thử theo đáp án chuẩn (Known-answer tests) từ FIPS 197 (2001), Phụ lục C.1 và NIST AES_Core128.
 
 Cách chạy: python -m unittest -v
-Các liên kết tham khảo và sự phân biệt giữa các phiên bản tiêu chuẩn có trong README.md.
 """
 
 from contextlib import redirect_stdout

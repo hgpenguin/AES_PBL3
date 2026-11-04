@@ -17,7 +17,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 from aes import ROUNDS, decrypt_block, encrypt_block
 
-# Các hằng số kiểm thử mặc định từ tiêu chuẩn FIPS 197 (Phụ lục C.1)
+# Các hằng số kiểm thử mặc định từ tiêu chuẩn FIPS 197 
 DEFAULT_KEY = "000102030405060708090a0b0c0d0e0f"
 DEFAULT_PLAINTEXT = "00112233445566778899aabbccddeeff"
 EXPECTED_CIPHERTEXT = "69c4e0d86a7b0430d8cdb78070b4c55a"
