@@ -9,7 +9,7 @@ Dự án cài đặt và nghiên cứu chuẩn mã hóa nâng cao **AES-128 (Adv
 Kế thừa kết quả khảo sát lý thuyết ở Tuần 2, phiên bản **Tuần 3** được cập nhật:
 1. **Kiến trúc Ma trận 2D trực quan (`class AES`):**
    * Tham khảo cấu trúc State ma trận $4 \times 4$ (`s[col][row]`) dễ hiểu và trực quan từ `boppreh/aes`.
-   * Tối ưu hóa phép nhân cột `mix_columns` và `inv_mix_columns` theo công thức đại số của sách kinh điển *The Design of Rijndael*.
+   * Tối ưu hóa phép nhân cột `mix_columns` và `inv_mix_columns` theo công thức đại số của sách *The Design of Rijndael*.
    * Đóng gói hướng đối tượng: `aes = AES(key)`.
 2. **Cơ chế tự động sinh khóa & Dẫn xuất khóa (Key Derivation):**
    * Sinh khóa ngẫu nhiên an toàn bằng CSPRNG của hệ điều hành (`os.urandom(16)`).
@@ -24,28 +24,13 @@ Kế thừa kết quả khảo sát lý thuyết ở Tuần 2, phiên bản **Tu
    * Cấu trúc file mã hóa chuẩn: `[16 bytes IV] + [Ciphertext CBC]`.
    * Kiểm chứng tính toàn vẹn 100% từng bit thông qua việc so khớp mã băm **SHA-256** trước và sau giải mã.
 
----
 
-## 📂 Cấu trúc thư mục Tuần 3
-
-```text
-AES_week3/
-├── aes.py          # Lõi giải thuật AES-128 (class AES, PKCS#7, CBC, File cipher, PBKDF2)
-├── demo.py         # Chương trình dòng lệnh CLI tương tác đa năng
-├── test_aes.py     # Bộ kiểm thử tự động 13 ca test (NIST FIPS 197, CBC, ZIP, Padding)
-└── README.md       # Tài liệu hướng dẫn sử dụng và thuyết minh kiến trúc
-```
-
----
-
-## 🚀 Hướng dẫn sử dụng
+## Hướng dẫn chạy
 
 ### 1. Chạy kiểm thử tự động (Unit Tests)
 ```bash
 python -m unittest -v test_aes.py
 ```
-*Kết quả: Đạt 13/13 bài kiểm thử tự động (khớp chuẩn NIST FIPS 197, mã hóa ZIP toàn vẹn, kiểm tra padding biên).*
-
 ---
 
 ### 2. Chạy Demo tương tác (`demo.py`)
@@ -87,7 +72,7 @@ Lệnh này sẽ tự động:
 
 ---
 
-## 📚 Tài liệu tham khảo
+## Tài liệu tham khảo
 1. **NIST FIPS 197**: *Advanced Encryption Standard (AES)*, U.S. National Institute of Standards and Technology.
 2. **Joan Daemen & Vincent Rijmen**: *The Design of Rijndael: AES - The Advanced Encryption Standard*, Springer.
 3. **Lucas Boppre**: *Pure Python AES implementation*, [boppreh/aes](https://github.com/boppreh/aes).
