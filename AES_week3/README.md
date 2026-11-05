@@ -32,7 +32,7 @@ Kế thừa kết quả khảo sát lý thuyết ở Tuần 2, phiên bản **Tu
 AES_week3/
 ├── aes.py          # Lõi giải thuật AES-128 (class AES, PKCS#7, CBC, File cipher, PBKDF2)
 ├── demo.py         # Chương trình dòng lệnh CLI tương tác đa năng
-├── test_aes.py     # Bộ kiểm thử tự động 11 ca test (NIST FIPS 197, CBC, ZIP, Padding)
+├── test_aes.py     # Bộ kiểm thử tự động 13 ca test (NIST FIPS 197, CBC, ZIP, Padding)
 └── README.md       # Tài liệu hướng dẫn sử dụng và thuyết minh kiến trúc
 ```
 
@@ -44,7 +44,7 @@ AES_week3/
 ```bash
 python -m unittest -v test_aes.py
 ```
-*Kết quả: Đạt 11/11 bài kiểm thử tự động (khớp chuẩn NIST FIPS 197, mã hóa ZIP toàn vẹn, kiểm tra padding biên).*
+*Kết quả: Đạt 13/13 bài kiểm thử tự động (khớp chuẩn NIST FIPS 197, mã hóa ZIP toàn vẹn, kiểm tra padding biên).*
 
 ---
 

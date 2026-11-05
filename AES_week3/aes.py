@@ -329,21 +329,38 @@ class AES:
 
 # --- MÔ-ĐUN MÃ HÓA VÀ GIẢI MÃ FILE / ZIP ĐA NĂNG (TUẦN 3) ---
 
+PWD_MAGIC = b"AES3PWD\x00"  # 8 byte nhận diện file được mã hóa bằng mật khẩu (kèm Salt)
+
+
 def encrypt_file(
     input_path: str | Path,
     output_path: str | Path,
-    key: bytes,
+    key: bytes | None = None,
     iv: bytes | None = None,
+    password: str | bytes | None = None,
 ) -> tuple[bytes, str]:
     """Mã hóa file bất kỳ (text, binary, zip, pdf) bằng AES-128-CBC.
 
-    Định dạng file đầu ra: [16 bytes IV] + [Ciphertext CBC].
+    - Nếu truyền `key` (16 byte): Định dạng đầu ra là [16B IV] + [Ciphertext CBC].
+    - Nếu truyền `password`: Tự động sinh Salt (16B), dẫn xuất khóa PBKDF2 và lưu
+      theo cấu trúc [8B Magic] + [16B Salt] + [16B IV] + [Ciphertext CBC] để khi giải
+      mã có thể tự động khôi phục đúng khóa từ mật khẩu.
     Trả về (iv, sha256_file_gốc).
     """
     inp = Path(input_path)
     out = Path(output_path)
     data = inp.read_bytes()
     sha256_orig = hashlib.sha256(data).hexdigest()
+
+    if password is not None:
+        derived_key, salt = derive_key(password)
+        aes = AES(derived_key)
+        used_iv, ciphertext = aes.encrypt_cbc(data, iv=iv)
+        out.write_bytes(PWD_MAGIC + salt + used_iv + ciphertext)
+        return used_iv, sha256_orig
+
+    if key is None:
+        raise ValueError("Cần cung cấp khóa `key` (16 byte) hoặc `password` để mã hóa file")
 
     aes = AES(key)
     used_iv, ciphertext = aes.encrypt_cbc(data, iv=iv)
@@ -354,21 +371,39 @@ def encrypt_file(
 def decrypt_file(
     input_path: str | Path,
     output_path: str | Path,
-    key: bytes,
+    key: bytes | None = None,
+    password: str | bytes | None = None,
 ) -> str:
     """Giải mã file AES-128-CBC và khôi phục file gốc nguyên vẹn.
 
+    Tự động trích xuất Salt nếu file được mã hóa bằng mật khẩu (PBKDF2).
     Trả về sha256_file_khôi_phục để đối chiếu toàn vẹn.
     """
     inp = Path(input_path)
     out = Path(output_path)
     payload = inp.read_bytes()
-    if len(payload) < 32:
-        raise ValueError("File mã hóa không hợp lệ hoặc quá ngắn (thiếu IV hoặc dữ liệu)")
-    iv = payload[:16]
-    ciphertext = payload[16:]
 
-    aes = AES(key)
+    if payload.startswith(PWD_MAGIC):
+        if len(payload) < 8 + 16 + 16 + 16:
+            raise ValueError("File mã hóa bằng mật khẩu không hợp lệ hoặc bị cắt cụt")
+        if password is None:
+            raise ValueError("File này được mã hóa bằng mật khẩu, vui lòng truyền --password khi giải mã")
+        salt = payload[8:24]
+        iv = payload[24:40]
+        ciphertext = payload[40:]
+        derived_key, _ = derive_key(password, salt=salt)
+        aes = AES(derived_key)
+    else:
+        if len(payload) < 32:
+            raise ValueError("File mã hóa không hợp lệ hoặc quá ngắn (thiếu IV hoặc dữ liệu)")
+        if password is not None and key is None:
+            raise ValueError("File này được mã hóa bằng khóa 16 byte trực tiếp, vui lòng dùng --key thay vì --password")
+        if key is None:
+            raise ValueError("Cần cung cấp khóa `key` (16 byte) để giải mã file")
+        iv = payload[:16]
+        ciphertext = payload[16:]
+        aes = AES(key)
+
     plaintext = aes.decrypt_cbc(ciphertext, iv)
     out.write_bytes(plaintext)
     return hashlib.sha256(plaintext).hexdigest()

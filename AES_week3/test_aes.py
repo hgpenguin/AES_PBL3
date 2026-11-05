@@ -178,6 +178,51 @@ class AESWeek3Tests(unittest.TestCase):
                 content = zf.read("info.txt").decode("utf-8")
                 self.assertEqual(content, "Tài liệu môn học PBL3 - Mạng thông tin máy tính.")
 
+    def test_nist_sp800_38a_cbc_vectors(self) -> None:
+        """Đối chiếu trực tiếp chế độ CBC với 4 khối Vector chuẩn NIST SP 800-38A Phụ lục F.2.1."""
+        key = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
+        iv = bytes.fromhex("000102030405060708090a0b0c0d0e0f")
+        plaintext_4_blocks = bytes.fromhex(
+            "6bc1bee22e409f96e93d7e117393172a"
+            "ae2d8a571e03ac9c9eb76fac45af8e51"
+            "30c81c46a35ce411e5fbc1191a0a52ef"
+            "f69f2445df4f9b17ad2b417be66c3710"
+        )
+        expected_cbc_4_blocks = bytes.fromhex(
+            "7649abac8119b246cee98e9b12e9197d"
+            "5086cb9b507219ee95db113a917678b2"
+            "73bed6b8e3c1743b7116e69e22229516"
+            "3ff1caa1681fac09120eca307586e1a7"
+        )
+        cbc_aes = AES(key)
+        _, ciphertext = cbc_aes.encrypt_cbc(plaintext_4_blocks, iv=iv)
+        # Do encrypt_cbc tự động thêm 1 block PKCS#7 (16 byte 0x10) ở cuối dữ liệu 64 byte,
+        # 64 byte đầu tiên của ciphertext phải khớp tuyệt đối 4 khối của NIST SP 800-38A:
+        self.assertEqual(ciphertext[:64], expected_cbc_4_blocks)
+        recovered = cbc_aes.decrypt_cbc(ciphertext, iv=iv)
+        self.assertEqual(recovered, plaintext_4_blocks)
+
+    def test_file_encryption_with_password(self) -> None:
+        """Kiểm tra mã hóa và giải mã file bằng mật khẩu (tự động lưu và khôi phục Salt)."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            orig_file = temp_path / "secret.txt"
+            enc_file = temp_path / "secret.txt.enc"
+            dec_file = temp_path / "secret_recovered.txt"
+
+            raw_data = "Dữ liệu mật kiểm thử PBKDF2 + Salt trong file".encode("utf-8")
+            orig_file.write_bytes(raw_data)
+
+            _, sha_orig = encrypt_file(orig_file, enc_file, password="MySecretPass@2026")
+            sha_dec = decrypt_file(enc_file, dec_file, password="MySecretPass@2026")
+
+            self.assertEqual(sha_orig, sha_dec)
+            self.assertEqual(dec_file.read_bytes(), raw_data)
+
+            # Kiểm tra nhập sai mật khẩu phải báo lỗi ValueError
+            with self.assertRaises(ValueError):
+                decrypt_file(enc_file, dec_file, password="WrongPassword123")
+
     def test_invalid_parameters_raise(self) -> None:
         """Kiểm tra ném ngoại lệ khi truyền tham số sai kích thước."""
         with self.assertRaises(ValueError):

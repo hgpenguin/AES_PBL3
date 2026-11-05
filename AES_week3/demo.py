@@ -118,7 +118,7 @@ def run_zip_file_demo(key: bytes) -> None:
     print("DEMO 3: MÃ HÓA VÀ GIẢI MÃ FILE ZIP ĐA NĂNG (KIỂM CHỨNG TOÀN VẸN)")
     print("=" * 70)
 
-    work_dir = Path("D:/PBL3_AES/AES_week3")
+    work_dir = Path(__file__).resolve().parent
     sample_zip = work_dir / "sample_archive.zip"
     encrypted_file = work_dir / "sample_archive.zip.enc"
     recovered_zip = work_dir / "sample_archive_recovered.zip"
@@ -165,7 +165,7 @@ def run_zip_file_demo(key: bytes) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--key", type=hex_block, default=DEFAULT_KEY, help="Khóa 16 byte dạng hex (mặc định: FIPS C.1)")
-    parser.add_argument("--password", help="Mật khẩu người dùng (tự động dẫn xuất thành khóa 128-bit qua PBKDF2)")
+    parser.add_argument("--password", help="Mật khẩu người dùng (dẫn xuất thành khóa 128-bit qua PBKDF2)")
     parser.add_argument("--plaintext", type=hex_block, help="Bản rõ 16 byte dạng hex")
     parser.add_argument("--text", help="Chuỗi văn bản UTF-8 bất kỳ cần mã hóa CBC")
     parser.add_argument("--trace", action="store_true", help="Hiển thị chi tiết State qua từng bước dạng ma trận 4x4")
@@ -176,35 +176,49 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Xác định khóa
-    if args.password:
-        key, salt = derive_key(args.password)
-        print(f"[Key Derivation] Dẫn xuất khóa từ mật khẩu \"{args.password}\":")
-        print(f"  Salt: {salt.hex()}")
-        print(f"  Key : {key.hex()}\n")
-    else:
-        key = args.key
+    try:
+        if args.encrypt_file:
+            out_path = args.out or (args.encrypt_file + ".enc")
+            if args.password:
+                iv, sha = encrypt_file(args.encrypt_file, out_path, password=args.password)
+            else:
+                iv, sha = encrypt_file(args.encrypt_file, out_path, key=args.key)
+            print(f"Mã hóa file thành công: {args.encrypt_file} -> {out_path}")
+            print(f"IV: {iv.hex()}")
+            print(f"SHA-256 gốc: {sha}")
+            return
 
-    # Xử lý các chế độ
-    if args.demo_zip:
-        run_zip_file_demo(key)
-    elif args.encrypt_file:
-        out_path = args.out or (args.encrypt_file + ".enc")
-        iv, sha = encrypt_file(args.encrypt_file, out_path, key)
-        print(f"Mã hóa file thành công: {args.encrypt_file} -> {out_path}")
-        print(f"IV: {iv.hex()}")
-        print(f"SHA-256 gốc: {sha}")
-    elif args.decrypt_file:
-        if not args.out:
-            parser.error("Khi giải mã file, vui lòng chỉ định file đầu ra bằng --out <đường_dẫn>")
-        sha = decrypt_file(args.decrypt_file, args.out, key)
-        print(f"Giải mã file thành công: {args.decrypt_file} -> {args.out}")
-        print(f"SHA-256 khôi phục: {sha}")
-    elif args.text is not None:
-        run_text_cbc_demo(args.text, key)
-    else:
-        plaintext = args.plaintext if args.plaintext is not None else bytes.fromhex(DEFAULT_PLAINTEXT)
-        run_single_block_demo(plaintext, key, args.trace)
+        if args.decrypt_file:
+            if not args.out:
+                parser.error("Khi giải mã file, vui lòng chỉ định file đầu ra bằng --out <đường_dẫn>")
+            if args.password:
+                sha = decrypt_file(args.decrypt_file, args.out, password=args.password)
+            else:
+                sha = decrypt_file(args.decrypt_file, args.out, key=args.key)
+            print(f"Giải mã file thành công: {args.decrypt_file} -> {args.out}")
+            print(f"SHA-256 khôi phục: {sha}")
+            return
+
+        # Với các chế độ demo trên bộ nhớ (--demo-zip, --text, single block)
+        if args.password:
+            key, salt = derive_key(args.password)
+            print(f'[Key Derivation] Dẫn xuất khóa từ mật khẩu "{args.password}":')
+            print(f"  Salt: {salt.hex()}")
+            print(f"  Key : {key.hex()}\n")
+        else:
+            key = args.key
+
+        if args.demo_zip:
+            run_zip_file_demo(key)
+        elif args.text is not None:
+            run_text_cbc_demo(args.text, key)
+        else:
+            plaintext = args.plaintext if args.plaintext is not None else bytes.fromhex(DEFAULT_PLAINTEXT)
+            run_single_block_demo(plaintext, key, args.trace)
+
+    except ValueError as err:
+        print(f"[LỖI DỮ LIỆU / XÁC THỰC]: {err}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
