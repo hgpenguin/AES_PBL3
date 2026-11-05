@@ -1,15 +1,13 @@
 """Chương trình tương tác Demo AES-128 (Tuần 3):
-- Chế độ 1: Mã hóa/giải mã một khối 16 byte chuẩn FIPS 197 C.1 (hỗ trợ cờ --trace hiển thị ma trận 4x4).
+- Chế độ 1: Mã hóa/giải mã một khối 16 byte chuẩn FIPS 197 C.1 (hỗ trợ cờ --trace).
 - Chế độ 2: Mã hóa/giải mã chuỗi văn bản UTF-8 bất kỳ với PKCS#7 Padding và Chế độ CBC.
-- Chế độ 3: Mã hóa và giải mã File / File ZIP đa năng với Vector khởi tạo (IV) và kiểm tra toàn vẹn SHA-256.
+- Chế độ 3: Mã hóa/giải mã File & ZIP đa năng với IV ngẫu nhiên và kiểm tra SHA-256.
 - Chế độ 4: Tự động chạy kịch bản demo tạo & mã hóa file ZIP thực tế (--demo-zip).
 """
 
 from __future__ import annotations
 
 import argparse
-import io
-import os
 import sys
 import zipfile
 from pathlib import Path
@@ -31,8 +29,6 @@ from aes import (
     decrypt_file,
     derive_key,
     encrypt_file,
-    generate_key,
-    matrix2bytes,
 )
 
 DEFAULT_KEY = "000102030405060708090a0b0c0d0e0f"
@@ -47,7 +43,9 @@ def hex_block(value: str) -> bytes:
     except ValueError as err:
         raise argparse.ArgumentTypeError("Cần nhập chuỗi hex hợp lệ (ví dụ: 001122...)") from err
     if len(block) != 16:
-        raise argparse.ArgumentTypeError(f"Yêu cầu chính xác 16 byte (32 ký tự hex), nhận được {len(block)} byte")
+        raise argparse.ArgumentTypeError(
+            f"Yêu cầu chính xác 16 byte (32 ký tự hex), nhận được {len(block)} byte"
+        )
     return block
 
 
@@ -87,7 +85,7 @@ def run_single_block_demo(plaintext: bytes, key: bytes, trace: bool) -> None:
         print(f"Đối chiếu NIST C.1 : {'PASS (Khớp 100% chuẩn NIST)' if fips_pass else 'FAIL'}")
 
     roundtrip_pass = (recovered == plaintext)
-    print(f"Kiểm tra hai chiều : {'PASS (Plaintext khôi phục trùng khớp 100%)' if roundtrip_pass else 'FAIL'}")
+    print(f"Kiểm tra hai chiều : {'PASS (Khôi phục khớp 100%)' if roundtrip_pass else 'FAIL'}")
     print("-" * 70)
 
 
@@ -97,7 +95,7 @@ def run_text_cbc_demo(text: str, key: bytes) -> None:
     print("DEMO 2: MÃ HÓA VĂN BẢN ĐỘ DÀI TÙY Ý VỚI PKCS#7 PADDING & CHẾ ĐỘ CBC")
     print("=" * 70)
     data = text.encode("utf-8")
-    print(f"Văn bản gốc: \"{text}\" ({len(data)} bytes)")
+    print(f'Văn bản gốc: "{text}" ({len(data)} bytes)')
     print(f"Khóa sử dụng: {key.hex()}")
 
     aes = AES(key)
@@ -107,8 +105,9 @@ def run_text_cbc_demo(text: str, key: bytes) -> None:
 
     decrypted = aes.decrypt_cbc(ciphertext, iv)
     decrypted_text = decrypted.decode("utf-8")
-    print(f"Văn bản sau giải mã & gỡ padding: \"{decrypted_text}\"")
-    print(f"Kết quả đối chiếu nội dung: {'PASS (Nội dung trùng khớp hoàn toàn)' if decrypted_text == text else 'FAIL'}")
+    print(f'Văn bản sau giải mã & gỡ padding: "{decrypted_text}"')
+    is_match = (decrypted_text == text)
+    print(f"Kết quả đối chiếu: {'PASS (Nội dung trùng khớp hoàn toàn)' if is_match else 'FAIL'}")
     print("-" * 70)
 
 
@@ -126,15 +125,18 @@ def run_zip_file_demo(key: bytes) -> None:
     # 1. Tạo file ZIP mẫu chứa tài liệu văn bản và dữ liệu
     print("1. Đang tạo file nén ZIP mẫu chứa 2 file dữ liệu...")
     with zipfile.ZipFile(sample_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("baocao_pbl3.txt", "Báo cáo tiến độ tuần 3 - Học phần Mạng thông tin máy tính PBL3.")
-        zf.writestr("data/students.csv", "id,name,role\n1,Nguyen Thai Hoang,Student\n2,Le Truong Uyen Nhi,Student\n")
+        zf.writestr("baocao_pbl3.txt", "Báo cáo tiến độ - Học phần Mạng thông tin máy tính PBL3.")
+        zf.writestr(
+            "data/students.csv",
+            "id,name,role\n1,Nguyen Thai Hoang,Student\n2,Le Truong Uyen Nhi,Student\n"
+        )
 
     orig_size = sample_zip.stat().st_size
     print(f"   -> Đã tạo file: {sample_zip.name} ({orig_size} bytes)")
 
     # 2. Mã hóa file ZIP
     print("\n2. Đang tiến hành mã hóa file ZIP bằng AES-128-CBC...")
-    iv, sha256_orig = encrypt_file(sample_zip, encrypted_file, key)
+    iv, sha256_orig = encrypt_file(sample_zip, encrypted_file, key=key)
     enc_size = encrypted_file.stat().st_size
     print(f"   -> File mã hóa: {encrypted_file.name} ({enc_size} bytes)")
     print(f"   -> IV khởi tạo: {iv.hex()}")
@@ -142,14 +144,15 @@ def run_zip_file_demo(key: bytes) -> None:
 
     # 3. Giải mã file ZIP
     print("\n3. Đang giải mã file mã hóa để khôi phục file ZIP...")
-    sha256_rec = decrypt_file(encrypted_file, recovered_zip, key)
+    sha256_rec = decrypt_file(encrypted_file, recovered_zip, key=key)
     rec_size = recovered_zip.stat().st_size
     print(f"   -> File khôi phục: {recovered_zip.name} ({rec_size} bytes)")
     print(f"   -> Mã băm SHA-256 file khôi phục: {sha256_rec}")
 
     # 4. Kiểm tra tính toàn vẹn và giải nén
     sha_match = (sha256_orig == sha256_rec)
-    print(f"\n4. Đối chiếu mã băm toàn vẹn SHA-256: {'PASS (Trùng khớp 100% từng bit)' if sha_match else 'FAIL'}")
+    res_str = "PASS (Trùng khớp từng byte)" if sha_match else "FAIL"
+    print(f"\n4. Đối chiếu mã băm SHA-256: {res_str}")
 
     print("5. Thử nghiệm mở file ZIP khôi phục và đọc nội dung:")
     with zipfile.ZipFile(recovered_zip, "r") as zf:
@@ -158,18 +161,33 @@ def run_zip_file_demo(key: bytes) -> None:
         content = zf.read("baocao_pbl3.txt").decode("utf-8")
         print(f"   - Trích xuất nội dung 'baocao_pbl3.txt': \"{content}\"")
 
-    print("\nKẾT LUẬN: Đã chứng minh giải thuật mã hóa/giải mã hoạt động hoàn hảo trên định dạng file ZIP đa năng!")
+    print("\nKẾT LUẬN: Đã xác thực giải thuật mã hóa/giải mã khôi phục chính xác tệp ZIP nhị phân!")
     print("=" * 70)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--key", type=hex_block, default=DEFAULT_KEY, help="Khóa 16 byte dạng hex (mặc định: FIPS C.1)")
-    parser.add_argument("--password", help="Mật khẩu người dùng (dẫn xuất thành khóa 128-bit qua PBKDF2)")
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--key", type=hex_block, default=DEFAULT_KEY,
+        help="Khóa 16 byte dạng hex (mặc định: FIPS C.1)"
+    )
+    parser.add_argument(
+        "--password",
+        help="Mật khẩu người dùng (dẫn xuất thành khóa 128-bit qua PBKDF2)"
+    )
     parser.add_argument("--plaintext", type=hex_block, help="Bản rõ 16 byte dạng hex")
     parser.add_argument("--text", help="Chuỗi văn bản UTF-8 bất kỳ cần mã hóa CBC")
-    parser.add_argument("--trace", action="store_true", help="Hiển thị chi tiết State qua từng bước dạng ma trận 4x4")
-    parser.add_argument("--demo-zip", action="store_true", help="Chạy tự động kịch bản mã hóa/giải mã file ZIP thực tế")
+    parser.add_argument(
+        "--trace", action="store_true",
+        help="Hiển thị chi tiết State qua từng bước dạng ma trận 4x4"
+    )
+    parser.add_argument(
+        "--demo-zip", action="store_true",
+        help="Chạy tự động kịch bản mã hóa/giải mã file ZIP thực tế"
+    )
     parser.add_argument("--encrypt-file", help="Đường dẫn file bất kỳ cần mã hóa")
     parser.add_argument("--decrypt-file", help="Đường dẫn file mã hóa cần giải mã")
     parser.add_argument("--out", help="Đường dẫn file đầu ra khi mã hóa/giải mã file")
@@ -190,7 +208,9 @@ def main() -> None:
 
         if args.decrypt_file:
             if not args.out:
-                parser.error("Khi giải mã file, vui lòng chỉ định file đầu ra bằng --out <đường_dẫn>")
+                parser.error(
+                    "Khi giải mã file, vui lòng chỉ định file đầu ra bằng --out <đường_dẫn>"
+                )
             if args.password:
                 sha = decrypt_file(args.decrypt_file, args.out, password=args.password)
             else:
@@ -199,7 +219,6 @@ def main() -> None:
             print(f"SHA-256 khôi phục: {sha}")
             return
 
-        # Với các chế độ demo trên bộ nhớ (--demo-zip, --text, single block)
         if args.password:
             key, salt = derive_key(args.password)
             print(f'[Key Derivation] Dẫn xuất khóa từ mật khẩu "{args.password}":')
@@ -213,7 +232,10 @@ def main() -> None:
         elif args.text is not None:
             run_text_cbc_demo(args.text, key)
         else:
-            plaintext = args.plaintext if args.plaintext is not None else bytes.fromhex(DEFAULT_PLAINTEXT)
+            plaintext = (
+                args.plaintext if args.plaintext is not None
+                else bytes.fromhex(DEFAULT_PLAINTEXT)
+            )
             run_single_block_demo(plaintext, key, args.trace)
 
     except ValueError as err:

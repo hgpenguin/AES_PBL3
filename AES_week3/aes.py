@@ -1,13 +1,14 @@
-"""Lõi thuật toán AES-128 thuần Python theo kiến trúc Ma trận 2D và Hướng đối tượng (OOP).
+"""AES-128 thuần Python (State ma trận 4x4) kèm CBC, đệm PKCS#7,
+dẫn xuất khóa PBKDF2 và mã hóa/giải mã file.
 
-Phiên bản Tuần 3:
-- Kiến trúc State ma trận 4x4 (list of lists of ints) trực quan, bám sát sách 'The Design of Rijndael'.
-- Đóng gói đầy đủ trong `class AES` (Key Expansion, encrypt_block, decrypt_block).
-- Mở rộng Tuần 3:
-  + Tự động sinh khóa ngẫu nhiên CSPRNG (os.urandom) và dẫn xuất khóa PBKDF2-HMAC-SHA256 từ mật khẩu.
-  + Cơ chế đệm và giải đệm PKCS#7 (pad, unpad).
-  + Chế độ hoạt động CBC (Cipher Block Chaining) với Vector khởi tạo IV ngẫu nhiên.
-  + Mô-đun mã hóa và giải mã File / ZIP đa năng kèm kiểm tra toàn vẹn mã băm SHA-256.
+Cài đặt lõi tham khảo boppreh/aes (MIT) và The Design of Rijndael.
+Mô-đun đệm PKCS#7 (RFC 5652), chế độ CBC (NIST SP 800-38A), dẫn xuất PBKDF2 (RFC 2898 / SP 800-132)
+và xử lý tệp tin nhị phân được nhóm tự thiết kế và cài đặt.
+
+Lưu ý về giới hạn kỹ thuật:
+- Mã hóa file đọc toàn bộ dữ liệu vào bộ nhớ (RAM), thích hợp cho tệp vừa và nhỏ.
+- Chế độ CBC chỉ đảm bảo tính bí mật (confidentiality), không có xác thực toàn vẹn (integrity)
+  chống sửa đổi bản mã; việc kết hợp HMAC (Encrypt-then-MAC) được định hướng cho các tuần tiếp theo.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from pathlib import Path
 
 # --- CÁC HẰNG SỐ CHUẨN CỦA AES-128 (FIPS 197) ---
 
-s_box: tuple[int, ...] = (
+S_BOX: tuple[int, ...] = (
     0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
     0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0,
     0xB7, 0xFD, 0x93, 0x26, 0x36, 0x3F, 0xF7, 0xCC, 0x34, 0xA5, 0xE5, 0xF1, 0x71, 0xD8, 0x31, 0x15,
@@ -38,7 +39,7 @@ s_box: tuple[int, ...] = (
     0x8C, 0xA1, 0x89, 0x0D, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0x0F, 0xB0, 0x54, 0xBB, 0x16,
 )
 
-inv_s_box: tuple[int, ...] = (
+INV_S_BOX: tuple[int, ...] = (
     0x52, 0x09, 0x6A, 0xD5, 0x30, 0x36, 0xA5, 0x38, 0xBF, 0x40, 0xA3, 0x9E, 0x81, 0xF3, 0xD7, 0xFB,
     0x7C, 0xE3, 0x39, 0x82, 0x9B, 0x2F, 0xFF, 0x87, 0x34, 0x8E, 0x43, 0x44, 0xC4, 0xDE, 0xE9, 0xCB,
     0x54, 0x7B, 0x94, 0x32, 0xA6, 0xC2, 0x23, 0x3D, 0xEE, 0x4C, 0x95, 0x0B, 0x42, 0xFA, 0xC3, 0x4E,
@@ -57,12 +58,17 @@ inv_s_box: tuple[int, ...] = (
     0x17, 0x2B, 0x04, 0x7E, 0xBA, 0x77, 0xD6, 0x26, 0xE1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0C, 0x7D,
 )
 
-r_con: tuple[int, ...] = (
+R_CON: tuple[int, ...] = (
     0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40,
     0x80, 0x1B, 0x36, 0x6C, 0xD8, 0xAB, 0x4D, 0x9A,
     0x2F, 0x5E, 0xBC, 0x63, 0xC6, 0x97, 0x35, 0x6A,
     0xD4, 0xB3, 0x7D, 0xFA, 0xEF, 0xC5, 0x91, 0x39,
 )
+
+# Tương thích ngược với tên biến cũ (nếu có module ngoài tham chiếu)
+s_box = S_BOX
+inv_s_box = INV_S_BOX
+r_con = R_CON
 
 TraceCallback = Callable[[int, str, bytes], None]
 
@@ -76,7 +82,7 @@ def bytes2matrix(text: bytes) -> list[list[int]]:
 
 def matrix2bytes(matrix: list[list[int]]) -> bytes:
     """Chuyển đổi ma trận 4x4 trở lại thành chuỗi 16 byte theo thứ tự cột."""
-    return bytes(sum(matrix, []))
+    return bytes(b for col in matrix for b in col)
 
 
 def xtime(a: int) -> int:
@@ -90,7 +96,7 @@ def sub_bytes(s: list[list[int]]) -> None:
     """Thay thế phi tuyến từng byte qua bảng S-box."""
     for i in range(4):
         for j in range(4):
-            s[i][j] = s_box[s[i][j]]
+            s[i][j] = S_BOX[s[i][j]]
 
 
 def shift_rows(s: list[list[int]]) -> None:
@@ -129,7 +135,7 @@ def inv_sub_bytes(s: list[list[int]]) -> None:
     """Thay thế nghịch đảo từng byte qua bảng Inv S-box."""
     for i in range(4):
         for j in range(4):
-            s[i][j] = inv_s_box[s[i][j]]
+            s[i][j] = INV_S_BOX[s[i][j]]
 
 
 def inv_shift_rows(s: list[list[int]]) -> None:
@@ -151,7 +157,7 @@ def inv_mix_columns(s: list[list[int]]) -> None:
     mix_columns(s)
 
 
-# --- CƠ CHẾ ĐỆM DỮ LIỆU CHUẨN PKCS#7 (TUẦN 3) ---
+# --- CƠ CHẾ ĐỆM DỮ LIỆU CHUẨN PKCS#7 (RFC 5652) ---
 
 def pad(data: bytes, block_size: int = 16) -> bytes:
     """Thêm byte đệm PKCS#7 để độ dài dữ liệu là bội số của block_size (16 byte)."""
@@ -171,7 +177,7 @@ def unpad(data: bytes, block_size: int = 16) -> bytes:
     return data[:-padding_len]
 
 
-# --- CƠ CHẾ TỰ ĐỘNG SINH KHÓA VÀ DẪN XUẤT KHÓA (TUẦN 3) ---
+# --- CƠ CHẾ SINH KHÓA CSPRNG VÀ DẪN XUẤT KHÓA PBKDF2 ---
 
 def generate_key(length: int = 16) -> bytes:
     """Sinh khóa ngẫu nhiên an toàn bằng CSPRNG của hệ điều hành."""
@@ -183,7 +189,11 @@ def derive_key(
     salt: bytes | None = None,
     iterations: int = 100_000,
 ) -> tuple[bytes, bytes]:
-    """Dẫn xuất khóa AES-128 từ mật khẩu bất kỳ qua PBKDF2-HMAC-SHA256. Trả về (key, salt)."""
+    """Dẫn xuất khóa AES-128 từ mật khẩu qua PBKDF2-HMAC-SHA256 (RFC 2898 / SP 800-132).
+    
+    Giá trị iterations=100_000 là tham số học thuật cân bằng giữa tính an toàn và hiệu năng.
+    Trả về (key, salt).
+    """
     if isinstance(password, str):
         password = password.encode("utf-8")
     if salt is None:
@@ -212,8 +222,8 @@ class AES:
             word = list(words[i - 1])
             if i % 4 == 0:
                 word = word[1:] + word[:1]  # RotWord
-                word = [s_box[b] for b in word]  # SubWord
-                word[0] ^= r_con[i // 4]  # XOR Rcon
+                word = [S_BOX[b] for b in word]  # SubWord
+                word[0] ^= R_CON[i // 4]  # XOR Rcon
             word = [a ^ b for a, b in zip(word, words[i - 4])]
             words.append(word)
         return [words[i:i + 4] for i in range(0, 44, 4)]
@@ -287,7 +297,10 @@ class AES:
         return matrix2bytes(state)
 
     def encrypt_cbc(self, plaintext: bytes, iv: bytes | None = None) -> tuple[bytes, bytes]:
-        """Mã hóa chuỗi byte độ dài bất kỳ bằng chế độ CBC kèm đệm PKCS#7. Trả về (iv, ciphertext)."""
+        """Mã hóa chuỗi byte độ dài bất kỳ bằng chế độ CBC kèm đệm PKCS#7.
+        
+        Trả về (iv, ciphertext).
+        """
         if iv is None:
             iv = os.urandom(16)
         elif len(iv) != 16:
@@ -327,7 +340,7 @@ class AES:
         return unpad(padded, 16)
 
 
-# --- MÔ-ĐUN MÃ HÓA VÀ GIẢI MÃ FILE / ZIP ĐA NĂNG (TUẦN 3) ---
+# --- MÔ-ĐUN MÃ HÓA VÀ GIẢI MÃ FILE / ZIP ĐA NĂNG ---
 
 PWD_MAGIC = b"AES3PWD\x00"  # 8 byte nhận diện file được mã hóa bằng mật khẩu (kèm Salt)
 
@@ -347,6 +360,11 @@ def encrypt_file(
       mã có thể tự động khôi phục đúng khóa từ mật khẩu.
     Trả về (iv, sha256_file_gốc).
     """
+    if key is not None and password is not None:
+        raise ValueError("Chỉ truyền một trong hai tham số: `key` hoặc `password`")
+    if key is None and password is None:
+        raise ValueError("Cần cung cấp khóa `key` (16 byte) hoặc `password` để mã hóa file")
+
     inp = Path(input_path)
     out = Path(output_path)
     data = inp.read_bytes()
@@ -359,9 +377,7 @@ def encrypt_file(
         out.write_bytes(PWD_MAGIC + salt + used_iv + ciphertext)
         return used_iv, sha256_orig
 
-    if key is None:
-        raise ValueError("Cần cung cấp khóa `key` (16 byte) hoặc `password` để mã hóa file")
-
+    assert key is not None
     aes = AES(key)
     used_iv, ciphertext = aes.encrypt_cbc(data, iv=iv)
     out.write_bytes(used_iv + ciphertext)
@@ -387,7 +403,9 @@ def decrypt_file(
         if len(payload) < 8 + 16 + 16 + 16:
             raise ValueError("File mã hóa bằng mật khẩu không hợp lệ hoặc bị cắt cụt")
         if password is None:
-            raise ValueError("File này được mã hóa bằng mật khẩu, vui lòng truyền --password khi giải mã")
+            raise ValueError(
+                "File này được mã hóa bằng mật khẩu, vui lòng truyền tham số `password` khi giải mã"
+            )
         salt = payload[8:24]
         iv = payload[24:40]
         ciphertext = payload[40:]
@@ -397,7 +415,10 @@ def decrypt_file(
         if len(payload) < 32:
             raise ValueError("File mã hóa không hợp lệ hoặc quá ngắn (thiếu IV hoặc dữ liệu)")
         if password is not None and key is None:
-            raise ValueError("File này được mã hóa bằng khóa 16 byte trực tiếp, vui lòng dùng --key thay vì --password")
+            raise ValueError(
+                "File này được mã hóa bằng khóa trực tiếp, "
+                "vui lòng truyền tham số `key` khi giải mã"
+            )
         if key is None:
             raise ValueError("Cần cung cấp khóa `key` (16 byte) để giải mã file")
         iv = payload[:16]
