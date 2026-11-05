@@ -1,7 +1,6 @@
-# AES-128 Thuần Python (Tuần 3 - Học phần PBL3)
+# Tuần 3 - Học phần PBL3
 
-Dự án cài đặt và nghiên cứu chuẩn mã hóa nâng cao **AES-128 (Advanced Encryption Standard)** thuần Python (không sử dụng thư viện mật mã bên ngoài như `pycryptodome` hay `cryptography`), phục vụ học phần **PBL3: Mạng thông tin máy tính**.
-
+Dự án cài đặt và nghiên cứu chuẩn mã hóa nâng cao **AES-128 (Advanced Encryption Standard)**.
 ---
 
 ## Điểm mới của tuần 3
