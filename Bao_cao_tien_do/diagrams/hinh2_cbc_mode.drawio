@@ -1,0 +1,52 @@
+<mxfile host="app.diagrams.net" modified="2026-11-07T03:49:00.000Z" agent="draw.io" version="24.0.0" type="device">
+  <diagram id="cbc-w3" name="Hinh 2 - Che do CBC">
+    <mxGraphModel dx="1000" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="520" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title1" value="a) Quá trình Mã hóa CBC: C[i] = Encrypt_K( P[i] XOR C[i-1] ), với C[-1] = IV" style="text;html=1;align=left;verticalAlign=middle;fontFamily=Times New Roman;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="30" y="15" width="600" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="iv1" value="IV (16B)&#xa;ngẫu nhiên" style="rounded=0;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontSize=12;fillColor=#F3F6FA;strokeWidth=1.5;" vertex="1" parent="1">
+          <mxGeometry x="30" y="90" width="100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p0" value="Bản rõ P[0] (16B)" style="rounded=0;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontSize=12;fontStyle=1;strokeWidth=1.5;" vertex="1" parent="1">
+          <mxGeometry x="170" y="45" width="130" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="xor0" value="+" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fontFamily=Times New Roman;fontSize=16;fontStyle=1;strokeWidth=1.5;" vertex="1" parent="1">
+          <mxGeometry x="223" y="98" width="24" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="enc0" value="AES-128 Encrypt (K)" style="rounded=0;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontSize=12;fontStyle=1;fillColor=#E8EEF5;strokeWidth=1.5;" vertex="1" parent="1">
+          <mxGeometry x="160" y="140" width="150" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="c0" value="Bản mã C[0] (16B)" style="rounded=0;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontSize=12;fontStyle=1;strokeWidth=1.5;" vertex="1" parent="1">
+          <mxGeometry x="170" y="198" width="130" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="p1" value="Bản rõ P[1] (16B)" style="rounded=0;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontSize=12;fontStyle=1;strokeWidth=1.5;" vertex="1" parent="1">
+          <mxGeometry x="415" y="45" width="130" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="xor1" value="+" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fontFamily=Times New Roman;fontSize=16;fontStyle=1;strokeWidth=1.5;" vertex="1" parent="1">
+          <mxGeometry x="468" y="98" width="24" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="enc1" value="AES-128 Encrypt (K)" style="rounded=0;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontSize=12;fontStyle=1;fillColor=#E8EEF5;strokeWidth=1.5;" vertex="1" parent="1">
+          <mxGeometry x="405" y="140" width="150" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="c1" value="Bản mã C[1] (16B)" style="rounded=0;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontSize=12;fontStyle=1;strokeWidth=1.5;" vertex="1" parent="1">
+          <mxGeometry x="415" y="198" width="130" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="ea1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" parent="1" source="iv1" target="xor0"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" parent="1" source="p0" target="xor0"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" parent="1" source="xor0" target="enc0"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" parent="1" source="enc0" target="c0"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" parent="1" source="c0" target="xor1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="350" y="214" /><mxPoint x="350" y="110" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ea6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" parent="1" source="p1" target="xor1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" parent="1" source="xor1" target="enc1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" parent="1" source="enc1" target="c1"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
