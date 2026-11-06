@@ -1,14 +1,7 @@
-"""AES-128 thuần Python (State ma trận 4x4) kèm CBC, đệm PKCS#7,
-dẫn xuất khóa PBKDF2 và mã hóa/giải mã file.
+"""AES-128 thuần Python với CBC, đệm PKCS#7 và dẫn xuất khóa PBKDF2.
 
-Cài đặt lõi tham khảo boppreh/aes (MIT) và The Design of Rijndael.
-Mô-đun đệm PKCS#7 (RFC 5652), chế độ CBC (NIST SP 800-38A), dẫn xuất PBKDF2 (RFC 2898 / SP 800-132)
-và xử lý tệp tin nhị phân được nhóm tự thiết kế và cài đặt.
-
-Lưu ý về giới hạn kỹ thuật:
-- Mã hóa file đọc toàn bộ dữ liệu vào bộ nhớ (RAM), thích hợp cho tệp vừa và nhỏ.
-- Chế độ CBC chỉ đảm bảo tính bí mật (confidentiality), không có xác thực toàn vẹn (integrity)
-  chống sửa đổi bản mã; việc kết hợp HMAC (Encrypt-then-MAC) được định hướng cho các tuần tiếp theo.
+Lõi AES tham khảo boppreh/aes (MIT) và The Design of Rijndael.
+Xử lý tệp đọc toàn bộ dữ liệu vào RAM. CBC chỉ cung cấp tính bí mật.
 """
 
 from __future__ import annotations
@@ -17,8 +10,6 @@ import hashlib
 import os
 from collections.abc import Callable
 from pathlib import Path
-
-# --- CÁC HẰNG SỐ CHUẨN CỦA AES-128 (FIPS 197) ---
 
 S_BOX: tuple[int, ...] = (
     0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
@@ -65,7 +56,7 @@ R_CON: tuple[int, ...] = (
     0xD4, 0xB3, 0x7D, 0xFA, 0xEF, 0xC5, 0x91, 0x39,
 )
 
-# Tương thích ngược với tên biến cũ (nếu có module ngoài tham chiếu)
+# Tên cũ được giữ để tương thích.
 s_box = S_BOX
 inv_s_box = INV_S_BOX
 r_con = R_CON
@@ -73,41 +64,34 @@ r_con = R_CON
 TraceCallback = Callable[[int, str, bytes], None]
 
 
-# --- CÁC HÀM TIỆN ÍCH CHUYỂN ĐỔI MA TRẬN 2D VÀ TOÁN HỌC GF(2^8) ---
-
 def bytes2matrix(text: bytes) -> list[list[int]]:
-    """Chuyển đổi chuỗi 16 byte thành ma trận 4x4 (4 cột, mỗi cột 4 byte)."""
+    """Gom từng 4 byte thành một cột. Truy cập state theo state[cột][hàng]."""
     return [list(text[i:i + 4]) for i in range(0, len(text), 4)]
 
 
 def matrix2bytes(matrix: list[list[int]]) -> bytes:
-    """Chuyển đổi ma trận 4x4 trở lại thành chuỗi 16 byte theo thứ tự cột."""
     return bytes(b for col in matrix for b in col)
 
 
 def xtime(a: int) -> int:
-    """Nhân một byte với {02} trong GF(2^8), modulo x^8 + x^4 + x^3 + x + 1."""
+    """Nhân một byte với 0x02 trong GF(2^8)."""
     return (((a << 1) ^ 0x1B) & 0xFF) if (a & 0x80) else (a << 1)
 
 
-# --- 4 PHÉP BIẾN ĐỔI THUẬN TRÊN MA TRẬN 2D (ENCRYPTION) ---
-
 def sub_bytes(s: list[list[int]]) -> None:
-    """Thay thế phi tuyến từng byte qua bảng S-box."""
     for i in range(4):
         for j in range(4):
             s[i][j] = S_BOX[s[i][j]]
 
 
 def shift_rows(s: list[list[int]]) -> None:
-    """Dịch vòng trái các hàng: hàng 1 dịch 1, hàng 2 dịch 2, hàng 3 dịch 3."""
+    """Dịch vòng trái từng hàng theo chỉ số hàng."""
     s[0][1], s[1][1], s[2][1], s[3][1] = s[1][1], s[2][1], s[3][1], s[0][1]
     s[0][2], s[1][2], s[2][2], s[3][2] = s[2][2], s[3][2], s[0][2], s[1][2]
     s[0][3], s[1][3], s[2][3], s[3][3] = s[3][3], s[0][3], s[1][3], s[2][3]
 
 
 def mix_single_column(a: list[int]) -> None:
-    """Biến đổi đại số Rijndael nhanh trên một cột 4 byte trong GF(2^8)."""
     t = a[0] ^ a[1] ^ a[2] ^ a[3]
     u = a[0]
     a[0] ^= t ^ xtime(a[0] ^ a[1])
@@ -117,36 +101,31 @@ def mix_single_column(a: list[int]) -> None:
 
 
 def mix_columns(s: list[list[int]]) -> None:
-    """Khuếch tán dữ liệu bằng phép nhân ma trận trên cả 4 cột."""
     for i in range(4):
         mix_single_column(s[i])
 
 
 def add_round_key(s: list[list[int]], k: list[list[int]]) -> None:
-    """XOR từng byte của State với ma trận khóa vòng tương ứng."""
     for i in range(4):
         for j in range(4):
             s[i][j] ^= k[i][j]
 
 
-# --- 4 PHÉP BIẾN ĐỔI NGHỊCH TRÊN MA TRẬN 2D (DECRYPTION) ---
-
 def inv_sub_bytes(s: list[list[int]]) -> None:
-    """Thay thế nghịch đảo từng byte qua bảng Inv S-box."""
     for i in range(4):
         for j in range(4):
             s[i][j] = INV_S_BOX[s[i][j]]
 
 
 def inv_shift_rows(s: list[list[int]]) -> None:
-    """Dịch vòng phải các hàng: hàng 1 dịch 1, hàng 2 dịch 2, hàng 3 dịch 3."""
+    """Dịch vòng phải từng hàng theo chỉ số hàng."""
     s[0][1], s[1][1], s[2][1], s[3][1] = s[3][1], s[0][1], s[1][1], s[2][1]
     s[0][2], s[1][2], s[2][2], s[3][2] = s[2][2], s[3][2], s[0][2], s[1][2]
     s[0][3], s[1][3], s[2][3], s[3][3] = s[1][3], s[2][3], s[3][3], s[0][3]
 
 
 def inv_mix_columns(s: list[list[int]]) -> None:
-    """Nghịch đảo MixColumns theo công thức tối ưu của sách The Design of Rijndael."""
+    """Hiệu chỉnh từng cột rồi áp dụng lại MixColumns."""
     for i in range(4):
         u = xtime(xtime(s[i][0] ^ s[i][2]))
         v = xtime(xtime(s[i][1] ^ s[i][3]))
@@ -157,16 +136,14 @@ def inv_mix_columns(s: list[list[int]]) -> None:
     mix_columns(s)
 
 
-# --- CƠ CHẾ ĐỆM DỮ LIỆU CHUẨN PKCS#7 (RFC 5652) ---
-
 def pad(data: bytes, block_size: int = 16) -> bytes:
-    """Thêm byte đệm PKCS#7 để độ dài dữ liệu là bội số của block_size (16 byte)."""
+    """Thêm đệm PKCS#7."""
     padding_len = block_size - (len(data) % block_size)
     return data + bytes([padding_len] * padding_len)
 
 
 def unpad(data: bytes, block_size: int = 16) -> bytes:
-    """Gỡ bỏ và xác thực byte đệm PKCS#7. Báo lỗi nếu padding bị sai."""
+    """Kiểm tra và gỡ đệm PKCS#7."""
     if not data or len(data) % block_size != 0:
         raise ValueError("Dữ liệu cần unpad không hợp lệ (không phải bội số của block_size)")
     padding_len = data[-1]
@@ -177,10 +154,7 @@ def unpad(data: bytes, block_size: int = 16) -> bytes:
     return data[:-padding_len]
 
 
-# --- CƠ CHẾ SINH KHÓA CSPRNG VÀ DẪN XUẤT KHÓA PBKDF2 ---
-
 def generate_key(length: int = 16) -> bytes:
-    """Sinh khóa ngẫu nhiên an toàn bằng CSPRNG của hệ điều hành."""
     return os.urandom(length)
 
 
@@ -189,11 +163,7 @@ def derive_key(
     salt: bytes | None = None,
     iterations: int = 100_000,
 ) -> tuple[bytes, bytes]:
-    """Dẫn xuất khóa AES-128 từ mật khẩu qua PBKDF2-HMAC-SHA256 (RFC 2898 / SP 800-132).
-    
-    Giá trị iterations=100_000 là tham số học thuật cân bằng giữa tính an toàn và hiệu năng.
-    Trả về (key, salt).
-    """
+    """Trả về (key, salt) từ PBKDF2-HMAC-SHA256."""
     if isinstance(password, str):
         password = password.encode("utf-8")
     if salt is None:
@@ -202,10 +172,8 @@ def derive_key(
     return key, salt
 
 
-# --- LỚP CHÍNH: CLASS AES-128 ---
-
 class AES:
-    """Bộ mã hóa và giải mã AES-128 thuần Python trên ma trận 2D."""
+    """Bộ mã hóa và giải mã AES-128 trên ma trận 2D."""
 
     def __init__(self, key: bytes):
         if not isinstance(key, (bytes, bytearray)):
@@ -216,20 +184,20 @@ class AES:
         self.round_keys = self.expand_key(self.key)
 
     def expand_key(self, key: bytes) -> list[list[list[int]]]:
-        """Mở rộng khóa 16 byte thành 11 ma trận khóa vòng 4x4 (K0 đến K10)."""
+        """Mở rộng khóa thành 11 khóa vòng (K0 đến K10)."""
         words = bytes2matrix(key)
         for i in range(4, 44):
             word = list(words[i - 1])
             if i % 4 == 0:
                 word = word[1:] + word[:1]  # RotWord
                 word = [S_BOX[b] for b in word]  # SubWord
-                word[0] ^= R_CON[i // 4]  # XOR Rcon
+                word[0] ^= R_CON[i // 4]
             word = [a ^ b for a, b in zip(word, words[i - 4])]
             words.append(word)
         return [words[i:i + 4] for i in range(0, 44, 4)]
 
     def encrypt_block(self, plaintext: bytes, trace: TraceCallback | None = None) -> bytes:
-        """Mã hóa một khối 16 byte; hỗ trợ trace từng bước biến đổi chi tiết."""
+        """Mã hóa một khối 16 byte, có thể theo dõi từng bước qua trace."""
         if len(plaintext) != 16:
             raise ValueError("Block bản rõ phải có độ dài đúng 16 byte")
         state = bytes2matrix(plaintext)
@@ -242,28 +210,21 @@ class AES:
         add_round_key(state, self.round_keys[0])
         record(0, "AddRoundKey")
 
-        for round_no in range(1, 10):
+        for round_no in range(1, 11):
             sub_bytes(state)
             record(round_no, "SubBytes")
             shift_rows(state)
             record(round_no, "ShiftRows")
-            mix_columns(state)
-            record(round_no, "MixColumns")
+            if round_no < 10:
+                mix_columns(state)
+                record(round_no, "MixColumns")
             add_round_key(state, self.round_keys[round_no])
             record(round_no, "AddRoundKey")
-
-        # Vòng 10 (bỏ qua MixColumns)
-        sub_bytes(state)
-        record(10, "SubBytes")
-        shift_rows(state)
-        record(10, "ShiftRows")
-        add_round_key(state, self.round_keys[10])
-        record(10, "AddRoundKey")
 
         return matrix2bytes(state)
 
     def decrypt_block(self, ciphertext: bytes, trace: TraceCallback | None = None) -> bytes:
-        """Giải mã một khối 16 byte theo chuẩn INVCIPHER (FIPS 197)."""
+        """Giải mã một khối 16 byte, có thể theo dõi từng bước qua trace."""
         if len(ciphertext) != 16:
             raise ValueError("Block bản mã phải có độ dài đúng 16 byte")
         state = bytes2matrix(ciphertext)
@@ -276,73 +237,59 @@ class AES:
         add_round_key(state, self.round_keys[10])
         record(0, "AddRoundKey")
 
-        for round_no in range(1, 10):
+        for round_no in range(1, 11):
             inv_shift_rows(state)
             record(round_no, "InvShiftRows")
             inv_sub_bytes(state)
             record(round_no, "InvSubBytes")
             add_round_key(state, self.round_keys[10 - round_no])
             record(round_no, "AddRoundKey")
-            inv_mix_columns(state)
-            record(round_no, "InvMixColumns")
-
-        # Vòng cuối đảo (bỏ qua InvMixColumns)
-        inv_shift_rows(state)
-        record(10, "InvShiftRows")
-        inv_sub_bytes(state)
-        record(10, "InvSubBytes")
-        add_round_key(state, self.round_keys[0])
-        record(10, "AddRoundKey")
+            if round_no < 10:
+                inv_mix_columns(state)
+                record(round_no, "InvMixColumns")
 
         return matrix2bytes(state)
 
     def encrypt_cbc(self, plaintext: bytes, iv: bytes | None = None) -> tuple[bytes, bytes]:
-        """Mã hóa chuỗi byte độ dài bất kỳ bằng chế độ CBC kèm đệm PKCS#7.
-        
-        Trả về (iv, ciphertext).
-        """
+        """Mã hóa CBC với đệm PKCS#7. Trả về (iv, ciphertext)."""
         if iv is None:
             iv = os.urandom(16)
         elif len(iv) != 16:
             raise ValueError("Vector khởi tạo IV phải có độ dài đúng 16 byte")
 
-        padded = pad(plaintext, 16)
-        blocks = [padded[i:i + 16] for i in range(0, len(padded), 16)]
+        padded = pad(plaintext)
         ciphertext_blocks: list[bytes] = []
         prev = iv
 
-        for block in blocks:
+        for offset in range(0, len(padded), 16):
+            block = padded[offset:offset + 16]
             xored = bytes(a ^ b for a, b in zip(block, prev))
-            encrypted = self.encrypt_block(xored)
-            ciphertext_blocks.append(encrypted)
-            prev = encrypted
+            prev = self.encrypt_block(xored)
+            ciphertext_blocks.append(prev)
 
         return iv, b"".join(ciphertext_blocks)
 
     def decrypt_cbc(self, ciphertext: bytes, iv: bytes) -> bytes:
-        """Giải mã ciphertext CBC và gỡ đệm PKCS#7 để khôi phục plaintext."""
+        """Giải mã CBC và gỡ đệm PKCS#7."""
         if len(iv) != 16:
             raise ValueError("Vector khởi tạo IV phải có độ dài đúng 16 byte")
         if len(ciphertext) == 0 or len(ciphertext) % 16 != 0:
             raise ValueError("Ciphertext CBC phải có độ dài là bội số của 16 byte")
 
-        blocks = [ciphertext[i:i + 16] for i in range(0, len(ciphertext), 16)]
         plaintext_blocks: list[bytes] = []
         prev = iv
 
-        for block in blocks:
+        for offset in range(0, len(ciphertext), 16):
+            block = ciphertext[offset:offset + 16]
             decrypted = self.decrypt_block(block)
             plain_block = bytes(a ^ b for a, b in zip(decrypted, prev))
             plaintext_blocks.append(plain_block)
             prev = block
 
-        padded = b"".join(plaintext_blocks)
-        return unpad(padded, 16)
+        return unpad(b"".join(plaintext_blocks))
 
 
-# --- MÔ-ĐUN MÃ HÓA VÀ GIẢI MÃ FILE / ZIP ĐA NĂNG ---
-
-PWD_MAGIC = b"AES3PWD\x00"  # 8 byte nhận diện file được mã hóa bằng mật khẩu (kèm Salt)
+PWD_MAGIC = b"AES3PWD\x00"
 
 
 def encrypt_file(
@@ -352,35 +299,27 @@ def encrypt_file(
     iv: bytes | None = None,
     password: str | bytes | None = None,
 ) -> tuple[bytes, str]:
-    """Mã hóa file bất kỳ (text, binary, zip, pdf) bằng AES-128-CBC.
+    """Mã hóa tệp và trả về (iv, SHA-256 của tệp gốc).
 
-    - Nếu truyền `key` (16 byte): Định dạng đầu ra là [16B IV] + [Ciphertext CBC].
-    - Nếu truyền `password`: Tự động sinh Salt (16B), dẫn xuất khóa PBKDF2 và lưu
-      theo cấu trúc [8B Magic] + [16B Salt] + [16B IV] + [Ciphertext CBC] để khi giải
-      mã có thể tự động khôi phục đúng khóa từ mật khẩu.
-    Trả về (iv, sha256_file_gốc).
+    Với khóa trực tiếp, tệp chứa IV + bản mã CBC.
+    Với mật khẩu, tệp chứa PWD_MAGIC + salt + IV + bản mã CBC.
     """
     if key is not None and password is not None:
         raise ValueError("Chỉ truyền một trong hai tham số: `key` hoặc `password`")
     if key is None and password is None:
         raise ValueError("Cần cung cấp khóa `key` (16 byte) hoặc `password` để mã hóa file")
 
-    inp = Path(input_path)
-    out = Path(output_path)
-    data = inp.read_bytes()
+    data = Path(input_path).read_bytes()
     sha256_orig = hashlib.sha256(data).hexdigest()
 
+    header = b""
     if password is not None:
-        derived_key, salt = derive_key(password)
-        aes = AES(derived_key)
-        used_iv, ciphertext = aes.encrypt_cbc(data, iv=iv)
-        out.write_bytes(PWD_MAGIC + salt + used_iv + ciphertext)
-        return used_iv, sha256_orig
+        key, salt = derive_key(password)
+        header = PWD_MAGIC + salt
 
     assert key is not None
-    aes = AES(key)
-    used_iv, ciphertext = aes.encrypt_cbc(data, iv=iv)
-    out.write_bytes(used_iv + ciphertext)
+    used_iv, ciphertext = AES(key).encrypt_cbc(data, iv=iv)
+    Path(output_path).write_bytes(header + used_iv + ciphertext)
     return used_iv, sha256_orig
 
 
@@ -390,27 +329,21 @@ def decrypt_file(
     key: bytes | None = None,
     password: str | bytes | None = None,
 ) -> str:
-    """Giải mã file AES-128-CBC và khôi phục file gốc nguyên vẹn.
+    """Giải mã tệp và trả về SHA-256 của tệp khôi phục."""
+    payload = Path(input_path).read_bytes()
 
-    Tự động trích xuất Salt nếu file được mã hóa bằng mật khẩu (PBKDF2).
-    Trả về sha256_file_khôi_phục để đối chiếu toàn vẹn.
-    """
-    inp = Path(input_path)
-    out = Path(output_path)
-    payload = inp.read_bytes()
-
+    iv_start = 0
     if payload.startswith(PWD_MAGIC):
-        if len(payload) < 8 + 16 + 16 + 16:
+        salt_start = len(PWD_MAGIC)
+        iv_start = salt_start + 16
+        if len(payload) < iv_start + 32:
             raise ValueError("File mã hóa bằng mật khẩu không hợp lệ hoặc bị cắt cụt")
         if password is None:
             raise ValueError(
                 "File này được mã hóa bằng mật khẩu, vui lòng truyền tham số `password` khi giải mã"
             )
-        salt = payload[8:24]
-        iv = payload[24:40]
-        ciphertext = payload[40:]
-        derived_key, _ = derive_key(password, salt=salt)
-        aes = AES(derived_key)
+        salt = payload[salt_start:iv_start]
+        key, _ = derive_key(password, salt=salt)
     else:
         if len(payload) < 32:
             raise ValueError("File mã hóa không hợp lệ hoặc quá ngắn (thiếu IV hoặc dữ liệu)")
@@ -421,10 +354,9 @@ def decrypt_file(
             )
         if key is None:
             raise ValueError("Cần cung cấp khóa `key` (16 byte) để giải mã file")
-        iv = payload[:16]
-        ciphertext = payload[16:]
-        aes = AES(key)
 
-    plaintext = aes.decrypt_cbc(ciphertext, iv)
-    out.write_bytes(plaintext)
+    iv_end = iv_start + 16
+    iv = payload[iv_start:iv_end]
+    plaintext = AES(key).decrypt_cbc(payload[iv_end:], iv)
+    Path(output_path).write_bytes(plaintext)
     return hashlib.sha256(plaintext).hexdigest()
